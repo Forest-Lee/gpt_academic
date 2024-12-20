@@ -1,3 +1,6 @@
+// 标志位
+enable_tts = false;
+
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //  第 1 部分: 工具函数
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -315,7 +318,7 @@ function addCopyButton(botElement, index, is_last_in_arr) {
         }
     });
 
-    if (enable_tts){
+    if (enable_tts) {
         var audioButton = document.createElement('button');
         audioButton.classList.add('audio-toggle-btn');
         audioButton.innerHTML = audioIcon;
@@ -343,7 +346,7 @@ function addCopyButton(botElement, index, is_last_in_arr) {
     var messageBtnColumn = document.createElement('div');
     messageBtnColumn.classList.add('message-btn-row');
     messageBtnColumn.appendChild(copyButton);
-    if (enable_tts){
+    if (enable_tts) {
         messageBtnColumn.appendChild(audioButton);
     }
     botElement.appendChild(messageBtnColumn);
@@ -388,6 +391,8 @@ function chatbotContentChanged(attempt = 1, force = false) {
 
                 // Now pass both the message element and the is_last_in_arr boolean to addCopyButton
                 addCopyButton(message, index, is_last_in_arr);
+
+                save_conversation_history();
             });
             // gradioApp().querySelectorAll('#gpt-chatbot .message-wrap .message.bot').forEach(addCopyButton);
         }, i === 0 ? 0 : 200);
@@ -793,6 +798,26 @@ function minor_ui_adjustment() {
     }, 200); // 每50毫秒执行一次
 }
 
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+//  对提交按钮的下拉选框做的变化
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+function ButtonWithDropdown_init() {
+    let submitButton = document.querySelector('button#elem_submit_visible');
+    let submitDropdown = document.querySelector('#gpt-submit-dropdown');
+    function updateDropdownWidth() {
+        if (submitButton) {
+            let setWidth = submitButton.clientWidth + submitDropdown.clientWidth;
+            let setLeft = -1 * submitButton.clientWidth;
+            document.getElementById('submit-dropdown-style')?.remove();
+            const styleElement = document.createElement('style');
+            styleElement.id = 'submit-dropdown-style';
+            styleElement.innerHTML = `#gpt-submit-dropdown ul.options { width: ${setWidth}px; left: ${setLeft}px; }`;
+            document.head.appendChild(styleElement);
+        }
+    }
+    window.addEventListener('resize', updateDropdownWidth);
+    updateDropdownWidth();
+}
 
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 //  第 6 部分: 避免滑动
@@ -831,8 +856,7 @@ function limit_scroll_position() {
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 function loadLive2D() {
-    if (document.querySelector(".waifu") )
-    {
+    if (document.querySelector(".waifu")) {
         $('.waifu').show();
     } else {
         try {
@@ -899,12 +923,12 @@ function gpt_academic_gradio_saveload(
     if (save_or_load === "load") {
         let value = getCookie(cookie_key);
         if (value) {
-            console.log('加载cookie', elem_id, value)
+            // console.log('加载cookie', elem_id, value)
             push_data_to_gradio_component(value, elem_id, load_type);
         }
         else {
             if (load_default) {
-                console.log('加载cookie的默认值', elem_id, load_default_value)
+                // console.log('加载cookie的默认值', elem_id, load_default_value)
                 push_data_to_gradio_component(load_default_value, elem_id, load_type);
             }
         }
@@ -914,129 +938,120 @@ function gpt_academic_gradio_saveload(
     }
 }
 
-enable_tts = false;
-async function GptAcademicJavaScriptInit(dark, prompt, live2d, layout, tts) {
-    // 第一部分，布局初始化
-    audio_fn_init();
-    minor_ui_adjustment();
-    chatbotIndicator = gradioApp().querySelector('#gpt-chatbot > div.wrap');
-    var chatbotObserver = new MutationObserver(() => {
-        chatbotContentChanged(1);
+function update_conversation_metadata() {
+    // Create a conversation UUID and timestamp
+    const conversationId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+    const conversationData = {
+        id: conversationId,
+        timestamp: timestamp
+    };
+    // Save to cookie
+    setCookie("conversation_metadata", JSON.stringify(conversationData), 2);
+    // read from cookie
+    let conversation_metadata = getCookie("conversation_metadata");
+    // console.log("conversation_metadata", conversation_metadata);
+}
+
+
+// Helper function to generate conversation preview
+function generatePreview(conversation, timestamp, maxLength = 100) {
+    if (!conversation || conversation.length === 0) return "";
+    // Join all messages with dash separator
+    let preview = conversation.join("\n");
+    const readableDate = new Date(timestamp).toLocaleString();
+    preview = readableDate + "\n" + preview;
+    if (preview.length <= maxLength) return preview;
+    return preview.substring(0, maxLength) + "...";
+}
+
+async function save_conversation_history() {
+    // 505030475
+    let chatbot = await get_data_from_gradio_component('gpt-chatbot');
+    let history = await get_data_from_gradio_component('history-ng');
+    let conversation_metadata = getCookie("conversation_metadata");
+    conversation_metadata = JSON.parse(conversation_metadata);
+    // console.log("conversation_metadata", conversation_metadata);
+    let conversation = {
+        timestamp: conversation_metadata.timestamp,
+        id: conversation_metadata.id,
+        metadata: conversation_metadata,
+        conversation: chatbot,
+        history: history,
+        preview: generatePreview(JSON.parse(history), conversation_metadata.timestamp)
+    };
+
+    // Get existing conversation history from local storage
+    let conversation_history = [];
+    try {
+        const stored = localStorage.getItem('conversation_history');
+        if (stored) {
+            conversation_history = JSON.parse(stored);
+        }
+    } catch (e) {
+        // console.error('Error reading conversation history from localStorage:', e);
+    }
+
+    // Find existing conversation with same ID
+    const existingIndex = conversation_history.findIndex(c => c.id === conversation.id);
+
+    if (existingIndex >= 0) {
+        // Update existing conversation
+        conversation_history[existingIndex] = conversation;
+    } else {
+        // Add new conversation
+        conversation_history.push(conversation);
+    }
+
+    // Sort conversations by timestamp, newest first
+    conversation_history.sort((a, b) => {
+        const timeA = new Date(a.timestamp).getTime();
+        const timeB = new Date(b.timestamp).getTime();
+        return timeB - timeA;
     });
-    chatbotObserver.observe(chatbotIndicator, { attributes: true, childList: true, subtree: true });
-    if (layout === "LEFT-RIGHT") { chatbotAutoHeight(); }
-    if (layout === "LEFT-RIGHT") { limit_scroll_position(); }
 
-    // 第二部分，读取Cookie，初始话界面
-    let searchString = "";
-    let bool_value = "";
-    //  darkmode 深色模式
-    if (getCookie("js_darkmode_cookie")) {
-        dark = getCookie("js_darkmode_cookie")
+    // Save back to local storage
+    try {
+        localStorage.setItem('conversation_history', JSON.stringify(conversation_history));
+        const LOCAL_STORAGE_UPDATED = "gptac_conversation_history_updated";
+        window.dispatchEvent(
+            new CustomEvent(LOCAL_STORAGE_UPDATED, {
+                detail: conversation_history
+            })
+        );
+    } catch (e) {
+        console.error('Error saving conversation history to localStorage:', e);
     }
-    dark = dark == "True";
-    if (document.querySelectorAll('.dark').length) {
-        if (!dark) {
-            document.querySelectorAll('.dark').forEach(el => el.classList.remove('dark'));
-        }
-    } else {
-        if (dark) {
-            document.querySelector('body').classList.add('dark');
-        }
-    }
-
-    //  自动朗读
-    if (tts != "DISABLE"){
-        enable_tts = true;
-        if (getCookie("js_auto_read_cookie")) {
-            auto_read_tts = getCookie("js_auto_read_cookie")
-            auto_read_tts = auto_read_tts == "True";
-            if (auto_read_tts) {
-                allow_auto_read_tts_flag = true;
-            }
-        }
-    }
-
-    // SysPrompt 系统静默提示词
-    gpt_academic_gradio_saveload("load", "elem_prompt", "js_system_prompt_cookie", null, "str");
-    // Temperature 大模型温度参数
-    gpt_academic_gradio_saveload("load", "elem_temperature", "js_temperature_cookie", null, "float");
-    // md_dropdown 大模型类型选择
-    if (getCookie("js_md_dropdown_cookie")) {
-        const cached_model = getCookie("js_md_dropdown_cookie");
-        var model_sel = await get_gradio_component("elem_model_sel");
-        // determine whether the cached model is in the choices
-        if (model_sel.props.choices.includes(cached_model)){
-            // change dropdown
-            gpt_academic_gradio_saveload("load", "elem_model_sel", "js_md_dropdown_cookie", null, "str");
-            // 连锁修改chatbot的label
-            push_data_to_gradio_component({
-                label: '当前模型：' + getCookie("js_md_dropdown_cookie"),
-                __type__: 'update'
-            }, "gpt-chatbot", "obj")
-        }
-    }
+}
 
 
+function restore_chat_from_local_storage(event) {
+    let conversation = event.detail;
+    push_data_to_gradio_component(conversation.conversation, "gpt-chatbot", "obj");
+    push_data_to_gradio_component(conversation.history, "history-ng", "obj");
+    // console.log("restore_chat_from_local_storage", conversation);
 
-    // clearButton 自动清除按钮
-    if (getCookie("js_clearbtn_show_cookie")) {
-        // have cookie
-        bool_value = getCookie("js_clearbtn_show_cookie")
-        bool_value = bool_value == "True";
-        searchString = "输入清除键";
+    // Create a conversation UUID and timestamp
+    const conversationId = conversation.id;
+    const timestamp = conversation.timestamp;
+    const conversationData = {
+        id: conversationId,
+        timestamp: timestamp
+    };
+    // Save to cookie
+    setCookie("conversation_metadata", JSON.stringify(conversationData), 2);
+    // read from cookie
+    let conversation_metadata = getCookie("conversation_metadata");
 
-        if (bool_value) {
-            // make btns appear
-            let clearButton = document.getElementById("elem_clear"); clearButton.style.display = "block";
-            let clearButton2 = document.getElementById("elem_clear2"); clearButton2.style.display = "block";
-            // deal with checkboxes
-            let arr_with_clear_btn = update_array(
-                await get_data_from_gradio_component('cbs'), "输入清除键", "add"
-            )
-            push_data_to_gradio_component(arr_with_clear_btn, "cbs", "no_conversion");
-        } else {
-            // make btns disappear
-            let clearButton = document.getElementById("elem_clear"); clearButton.style.display = "none";
-            let clearButton2 = document.getElementById("elem_clear2"); clearButton2.style.display = "none";
-            // deal with checkboxes
-            let arr_without_clear_btn = update_array(
-                await get_data_from_gradio_component('cbs'), "输入清除键", "remove"
-            )
-            push_data_to_gradio_component(arr_without_clear_btn, "cbs", "no_conversion");
-        }
-    }
+}
 
-    // live2d 显示
-    if (getCookie("js_live2d_show_cookie")) {
-        // have cookie
-        searchString = "添加Live2D形象";
-        bool_value = getCookie("js_live2d_show_cookie");
-        bool_value = bool_value == "True";
-        if (bool_value) {
-            loadLive2D();
-            let arr_with_live2d = update_array(
-                await get_data_from_gradio_component('cbsc'), "添加Live2D形象", "add"
-            )
-            push_data_to_gradio_component(arr_with_live2d, "cbsc", "no_conversion");
-        } else {
-            try {
-                $('.waifu').hide();
-                let arr_without_live2d = update_array(
-                    await get_data_from_gradio_component('cbsc'), "添加Live2D形象", "remove"
-                )
-                push_data_to_gradio_component(arr_without_live2d, "cbsc", "no_conversion");
-            } catch (error) {
-            }
-        }
-    } else {
-        // do not have cookie
-        if (live2d) {
-            loadLive2D();
-        } else {
-        }
-    }
 
+function clear_conversation(a, b, c) {
+    update_conversation_metadata();
+    let stopButton = document.getElementById("elem_stop");
+    stopButton.click();
+    // console.log("clear_conversation");
+    return reset_conversation(a, b);
 }
 
 
@@ -1044,108 +1059,28 @@ function reset_conversation(a, b) {
     // console.log("js_code_reset");
     a = btoa(unescape(encodeURIComponent(JSON.stringify(a))));
     setCookie("js_previous_chat_cookie", a, 1);
-    gen_restore_btn();
+    b = btoa(unescape(encodeURIComponent(JSON.stringify(b))));
+    setCookie("js_previous_history_cookie", b, 1);
+    // gen_restore_btn();
     return [[], [], "已重置"];
 }
 
+
 // clear -> 将 history 缓存至 history_cache -> 点击复原 -> restore_previous_chat() -> 触发elem_update_history -> 读取 history_cache
 function restore_previous_chat() {
-    console.log("restore_previous_chat");
+    // console.log("restore_previous_chat");
     let chat = getCookie("js_previous_chat_cookie");
     chat = JSON.parse(decodeURIComponent(escape(atob(chat))));
     push_data_to_gradio_component(chat, "gpt-chatbot", "obj");
-    document.querySelector("#elem_update_history").click(); // in order to call set_history_gr_state, and send history state to server
+    let history = getCookie("js_previous_history_cookie");
+    history = JSON.parse(decodeURIComponent(escape(atob(history))));
+    push_data_to_gradio_component(history, "history-ng", "obj");
+    // document.querySelector("#elem_update_history").click(); // in order to call set_history_gr_state, and send history state to server
 }
 
-function gen_restore_btn() {
-
-
-    // 创建按钮元素
-    const button = document.createElement('div');
-    // const recvIcon = '<span><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" height=".8em" width=".8em" xmlns="http://www.w3.org/2000/svg"><polyline points="20 6 9 17 4 12"></polyline></svg></span>';
-    const rec_svg = '<svg t="1714361184567" style="transform:translate(1px, 2.5px)" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="4389" width="35" height="35"><path d="M320 512h384v64H320zM320 384h384v64H320zM320 640h192v64H320z" p-id="4390" fill="#ffffff"></path><path d="M863.7 544c-1.9 44-11.4 86.8-28.5 127.2-18.5 43.8-45.1 83.2-78.9 117-33.8 33.8-73.2 60.4-117 78.9C593.9 886.3 545.7 896 496 896s-97.9-9.7-143.2-28.9c-43.8-18.5-83.2-45.1-117-78.9-33.8-33.8-60.4-73.2-78.9-117C137.7 625.9 128 577.7 128 528s9.7-97.9 28.9-143.2c18.5-43.8 45.1-83.2 78.9-117s73.2-60.4 117-78.9C398.1 169.7 446.3 160 496 160s97.9 9.7 143.2 28.9c23.5 9.9 45.8 22.2 66.5 36.7l-119.7 20 9.9 59.4 161.6-27 59.4-9.9-9.9-59.4-27-161.5-59.4 9.9 19 114.2C670.3 123.8 586.4 96 496 96 257.4 96 64 289.4 64 528s193.4 432 432 432c233.2 0 423.3-184.8 431.7-416h-64z" p-id="4391" fill="#ffffff"></path></svg>'
-    const recvIcon = '<span>' + rec_svg + '</span>';
-
-    // 设置按钮的样式和属性
-    button.id = 'floatingButton';
-    button.className = 'glow';
-    button.style.textAlign = 'center';
-    button.style.position = 'fixed';
-    button.style.bottom = '10px';
-    button.style.left = '10px';
-    button.style.width = '50px';
-    button.style.height = '50px';
-    button.style.borderRadius = '50%';
-    button.style.backgroundColor = '#007bff';
-    button.style.color = 'white';
-    button.style.display = 'flex';
-    button.style.alignItems = 'center';
-    button.style.justifyContent = 'center';
-    button.style.cursor = 'pointer';
-    button.style.transition = 'all 0.3s ease';
-    button.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
-
-    button.innerHTML = recvIcon;
-
-    // 添加发光动画的关键帧
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'floatingButtonStyle';
-    styleSheet.innerText = `
-    @keyframes glow {
-        from {
-        box-shadow: 0 0 10px rgba(0,0,0,0.2);
-        }
-        to {
-        box-shadow: 0 0 13px rgba(0,0,0,0.5);
-        }
-    }
-    #floatingButton.glow {
-        animation: glow 1s infinite alternate;
-    }
-    #floatingButton:hover {
-        transform: scale(1.2);
-        box-shadow: 0 0 20px rgba(0,0,0,0.4);
-    }
-    #floatingButton.disappearing {
-        animation: shrinkAndDisappear 0.5s forwards;
-    }
-    `;
-
-    // only add when not exist
-    if (!document.getElementById('recvButtonStyle'))
-    {
-        document.head.appendChild(styleSheet);
-    }
-
-    // 鼠标悬停和移开的事件监听器
-    button.addEventListener('mouseover', function () {
-        this.textContent = "还原\n对话";
-    });
-
-    button.addEventListener('mouseout', function () {
-        this.innerHTML = recvIcon;
-    });
-
-    // 点击事件监听器
-    button.addEventListener('click', function () {
-        // 添加一个类来触发缩小和消失的动画
-        restore_previous_chat();
-        this.classList.add('disappearing');
-        // 在动画结束后移除按钮
-        document.body.removeChild(this);
-    });
-    // only add when not exist
-    if (!document.getElementById('recvButton'))
-    {
-        document.body.appendChild(button);
-    }
-
-    // 将按钮添加到页面中
-
-}
 
 async function on_plugin_exe_complete(fn_name) {
-    console.log(fn_name);
+    // console.log(fn_name);
     if (fn_name === "保存当前的对话") {
         // get chat profile path
         let chatbot = await get_data_from_gradio_component('gpt-chatbot');
@@ -1164,373 +1099,15 @@ async function on_plugin_exe_complete(fn_name) {
         }
         let href = get_href(may_have_chat_profile_info);
         if (href) {
-            const cleanedHref = href.replace('file=', ''); // /home/fuqingxu/chatgpt_academic/gpt_log/default_user/chat_history/GPT-Academic对话存档2024-04-12-00-35-06.html
-            console.log(cleanedHref);
+            const cleanedHref = href.replace('file=', ''); // gpt_log/default_user/chat_history/GPT-Academic对话存档2024-04-12-00-35-06.html
+            // console.log(cleanedHref);
         }
 
     }
 }
 
 
-
-
-
-
-
-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-//  第 8 部分: TTS语音生成函数
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-audio_debug = false;
-class AudioPlayer {
-    constructor() {
-        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        this.queue = [];
-        this.isPlaying = false;
-        this.currentSource = null; // 添加属性来保存当前播放的源
-    }
-
-    // Base64 编码的字符串转换为 ArrayBuffer
-    base64ToArrayBuffer(base64) {
-        const binaryString = window.atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        return bytes.buffer;
-    }
-
-    // 检查音频播放队列并播放音频
-    checkQueue() {
-        if (!this.isPlaying && this.queue.length > 0) {
-            this.isPlaying = true;
-            const nextAudio = this.queue.shift();
-            this.play_wave(nextAudio);
-        }
-    }
-
-    // 将音频添加到播放队列
-    enqueueAudio(audio_buf_wave) {
-        if (allow_auto_read_tts_flag) {
-            this.queue.push(audio_buf_wave);
-            this.checkQueue();
-        }
-    }
-
-    // 播放音频
-    async play_wave(encodedAudio) {
-        //const audioData = this.base64ToArrayBuffer(encodedAudio);
-        const audioData = encodedAudio;
-        try {
-            const buffer = await this.audioCtx.decodeAudioData(audioData);
-            const source = this.audioCtx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(this.audioCtx.destination);
-            source.onended = () => {
-                if (allow_auto_read_tts_flag) {
-                    this.isPlaying = false;
-                    this.currentSource = null; // 播放结束后清空当前源
-                    this.checkQueue();
-                }
-            };
-            this.currentSource = source; // 保存当前播放的源
-            source.start();
-        } catch (e) {
-            console.log("Audio error!", e);
-            this.isPlaying = false;
-            this.currentSource = null; // 出错时也应清空当前源
-            this.checkQueue();
-        }
-    }
-
-    // 新增：立即停止播放音频的方法
-    stop() {
-        if (this.currentSource) {
-            this.queue = []; // 清空队列
-            this.currentSource.stop(); // 停止当前源
-            this.currentSource = null; // 清空当前源
-            this.isPlaying = false; // 更新播放状态
-            // 关闭音频上下文可能会导致无法再次播放音频，因此仅停止当前源
-            // this.audioCtx.close(); // 可选：如果需要可以关闭音频上下文
-        }
-    }
-}
-
-const audioPlayer = new AudioPlayer();
-
-class FIFOLock {
-    constructor() {
-        this.queue = [];
-        this.currentTaskExecuting = false;
-    }
-
-    lock() {
-        let resolveLock;
-        const lock = new Promise(resolve => {
-            resolveLock = resolve;
-        });
-
-        this.queue.push(resolveLock);
-
-        if (!this.currentTaskExecuting) {
-            this._dequeueNext();
-        }
-
-        return lock;
-    }
-
-    _dequeueNext() {
-        if (this.queue.length === 0) {
-            this.currentTaskExecuting = false;
-            return;
-        }
-        this.currentTaskExecuting = true;
-        const resolveLock = this.queue.shift();
-        resolveLock();
-    }
-
-    unlock() {
-        this.currentTaskExecuting = false;
-        this._dequeueNext();
-    }
-}
-
-
-
-
-
-
-
-
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Define the trigger function with delay parameter T in milliseconds
-function trigger(T, fire) {
-    // Variable to keep track of the timer ID
-    let timeoutID = null;
-    // Variable to store the latest arguments
-    let lastArgs = null;
-
-    return function (...args) {
-        // Update lastArgs with the latest arguments
-        lastArgs = args;
-        // Clear the existing timer if the function is called again
-        if (timeoutID !== null) {
-            clearTimeout(timeoutID);
-        }
-        // Set a new timer that calls the `fire` function with the latest arguments after T milliseconds
-        timeoutID = setTimeout(() => {
-            fire(...lastArgs);
-        }, T);
-    };
-}
-
-
-prev_text = ""; // previous text, this is used to check chat changes
-prev_text_already_pushed = ""; // previous text already pushed to audio, this is used to check where we should continue to play audio
-prev_chatbot_index = -1;
-const delay_live_text_update = trigger(3000, on_live_stream_terminate);
-
-function on_live_stream_terminate(latest_text) {
-    // remove `prev_text_already_pushed` from `latest_text`
-    if (audio_debug) console.log("on_live_stream_terminate", latest_text);
-    remaining_text = latest_text.slice(prev_text_already_pushed.length);
-    if ((!isEmptyOrWhitespaceOnly(remaining_text)) && remaining_text.length != 0) {
-        prev_text_already_pushed = latest_text;
-        push_text_to_audio(remaining_text);
-    }
-}
-function is_continue_from_prev(text, prev_text) {
-    abl = 5
-    if (text.length < prev_text.length - abl) {
-        return false;
-    }
-    if (prev_text.length > 10) {
-        return text.startsWith(prev_text.slice(0, Math.min(prev_text.length - abl, 100)));
-    } else {
-        return text.startsWith(prev_text);
-    }
-}
-function isEmptyOrWhitespaceOnly(remaining_text) {
-    // Replace \n and 。 with empty strings
-    let textWithoutSpecifiedCharacters = remaining_text.replace(/[\n。]/g, '');
-    // Check if the remaining string is empty
-    return textWithoutSpecifiedCharacters.trim().length === 0;
-}
-function process_increased_text(remaining_text) {
-    // console.log('[is continue], remaining_text: ', remaining_text)
-    // remaining_text starts with \n or 。, then move these chars into prev_text_already_pushed
-    while (remaining_text.startsWith('\n') || remaining_text.startsWith('。')) {
-        prev_text_already_pushed = prev_text_already_pushed + remaining_text[0];
-        remaining_text = remaining_text.slice(1);
-    }
-    if (remaining_text.includes('\n') || remaining_text.includes('。')) { // determine remaining_text contain \n or 。
-        // new message begin!
-        index_of_last_sep = Math.max(remaining_text.lastIndexOf('\n'), remaining_text.lastIndexOf('。'));
-        // break the text into two parts
-        tobe_pushed = remaining_text.slice(0, index_of_last_sep + 1);
-        prev_text_already_pushed = prev_text_already_pushed + tobe_pushed;
-        // console.log('[is continue], push: ', tobe_pushed)
-        // console.log('[is continue], update prev_text_already_pushed: ', prev_text_already_pushed)
-        if (!isEmptyOrWhitespaceOnly(tobe_pushed)) {
-            // console.log('[is continue], remaining_text is empty')
-            push_text_to_audio(tobe_pushed);
-        }
-    }
-}
-function process_latest_text_output(text, chatbot_index) {
-    if (text.length == 0) {
-        prev_text = text;
-        prev_text_mask = text;
-        // console.log('empty text')
-        return;
-    }
-    if (text == prev_text) {
-        // console.log('[nothing changed]')
-        return;
-    }
-
-    var is_continue = is_continue_from_prev(text, prev_text_already_pushed);
-    if (chatbot_index == prev_chatbot_index && is_continue) {
-        // on_text_continue_grow
-        remaining_text = text.slice(prev_text_already_pushed.length);
-        process_increased_text(remaining_text);
-        delay_live_text_update(text); // in case of no \n or 。 in the text, this timer will finally commit
-    }
-    else if (chatbot_index == prev_chatbot_index && !is_continue) {
-        if (audio_debug) console.log('---------------------');
-        if (audio_debug) console.log('text twisting!');
-        if (audio_debug) console.log('[new message begin]', 'text', text, 'prev_text_already_pushed', prev_text_already_pushed);
-        if (audio_debug) console.log('---------------------');
-        prev_text_already_pushed = "";
-        delay_live_text_update(text); // in case of no \n or 。 in the text, this timer will finally commit
-    }
-    else {
-        // on_new_message_begin, we have to clear `prev_text_already_pushed`
-        if (audio_debug) console.log('---------------------');
-        if (audio_debug) console.log('new message begin!');
-        if (audio_debug) console.log('[new message begin]', 'text', text, 'prev_text_already_pushed', prev_text_already_pushed);
-        if (audio_debug) console.log('---------------------');
-        prev_text_already_pushed = "";
-        process_increased_text(text);
-        delay_live_text_update(text); // in case of no \n or 。 in the text, this timer will finally commit
-    }
-    prev_text = text;
-    prev_chatbot_index = chatbot_index;
-}
-
-const audio_push_lock = new FIFOLock();
-async function push_text_to_audio(text) {
-    if (!allow_auto_read_tts_flag) {
-        return;
-    }
-    await audio_push_lock.lock();
-    var lines = text.split(/[\n。]/);
-    for (const audio_buf_text of lines) {
-        if (audio_buf_text) {
-            // Append '/vits' to the current URL to form the target endpoint
-            const url = `${window.location.href}vits`;
-            // Define the payload to be sent in the POST request
-            const payload = {
-                text: audio_buf_text, // Ensure 'audio_buf_text' is defined with valid data
-                text_language: "zh"
-            };
-            // Call the async postData function and log the response
-            post_text(url, payload, send_index);
-            send_index = send_index + 1;
-            if (audio_debug) console.log(send_index, audio_buf_text);
-            // sleep 2 seconds
-            if (allow_auto_read_tts_flag) {
-                await delay(3000);
-            }
-        }
-    }
-    audio_push_lock.unlock();
-}
-
-
-send_index = 0;
-recv_index = 0;
-to_be_processed = [];
-async function UpdatePlayQueue(cnt, audio_buf_wave) {
-    if (cnt != recv_index) {
-        to_be_processed.push([cnt, audio_buf_wave]);
-        if (audio_debug) console.log('cache', cnt);
-    }
-    else {
-        if (audio_debug) console.log('processing', cnt);
-        recv_index = recv_index + 1;
-        if (audio_buf_wave) {
-            audioPlayer.enqueueAudio(audio_buf_wave);
-        }
-        // deal with other cached audio
-        while (true) {
-            find_any = false;
-            for (i = to_be_processed.length - 1; i >= 0; i--) {
-                if (to_be_processed[i][0] == recv_index) {
-                    if (audio_debug) console.log('processing cached', recv_index);
-                    if (to_be_processed[i][1]) {
-                        audioPlayer.enqueueAudio(to_be_processed[i][1]);
-                    }
-                    to_be_processed.pop(i);
-                    find_any = true;
-                    recv_index = recv_index + 1;
-                }
-            }
-            if (!find_any) { break; }
-        }
-    }
-}
-
-function post_text(url, payload, cnt) {
-    if (allow_auto_read_tts_flag) {
-        postData(url, payload, cnt)
-        .then(data => {
-            UpdatePlayQueue(cnt, data);
-            return;
-        });
-    } else {
-        UpdatePlayQueue(cnt, null);
-        return;
-    }
-}
-
-notify_user_error = false
-// Create an async function to perform the POST request
-async function postData(url = '', data = {}) {
-    try {
-        // Use the Fetch API with await
-        const response = await fetch(url, {
-            method: 'POST', // Specify the request method
-            body: JSON.stringify(data), // Convert the JavaScript object to a JSON string
-        });
-        // Check if the response is ok (status in the range 200-299)
-        if (!response.ok) {
-            // If not OK, throw an error
-            console.info('There was a problem during audio generation requests:', response.status);
-            // if (!notify_user_error){
-            //     notify_user_error = true;
-            //     alert('There was a problem during audio generation requests:', response.status);
-            // }
-            return null;
-        }
-        // If OK, parse and return the JSON response
-        return await response.arrayBuffer();
-    } catch (error) {
-        // Log any errors that occur during the fetch operation
-        console.info('There was a problem during audio generation requests:', error);
-        // if (!notify_user_error){
-        //     notify_user_error = true;
-        //     alert('There was a problem during audio generation requests:', error);
-        // }
-        return null;
-    }
-}
-
-async function generate_menu(guiBase64String, btnName){
+async function generate_menu(guiBase64String, btnName) {
     // assign the button and menu data
     push_data_to_gradio_component(guiBase64String, "invisible_current_pop_up_plugin_arg", "string");
     push_data_to_gradio_component(btnName, "invisible_callback_btn_for_plugin_exe", "string");
@@ -1564,22 +1141,22 @@ async function generate_menu(guiBase64String, btnName){
             ///////////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////////    Textbox   ////////////////////////////////////
             ///////////////////////////////////////////////////////////////////////////////////////////
-            if (gui_args[key].type=='string'){ // PLUGIN_ARG_MENU
+            if (gui_args[key].type == 'string') { // PLUGIN_ARG_MENU
                 const component_name = "plugin_arg_txt_" + text_cnt;
                 push_data_to_gradio_component({
                     visible: true,
-                    label: gui_args[key].title + "(" + gui_args[key].description +  ")",
+                    label: gui_args[key].title + "(" + gui_args[key].description + ")",
                     // label: gui_args[key].title,
                     placeholder: gui_args[key].description,
                     __type__: 'update'
                 }, component_name, "obj");
-                if (key === "main_input"){
+                if (key === "main_input") {
                     // 为了与旧插件兼容，生成菜单时，自动加载输入栏的值
                     let current_main_input = await get_data_from_gradio_component('user_input_main');
                     let current_main_input_2 = await get_data_from_gradio_component('user_input_float');
                     push_data_to_gradio_component(current_main_input + current_main_input_2, component_name, "obj");
                 }
-                else if (key === "advanced_arg"){
+                else if (key === "advanced_arg") {
                     // 为了与旧插件兼容，生成菜单时，自动加载旧高级参数输入区的值
                     let advance_arg_input_legacy = await get_data_from_gradio_component('advance_arg_input_legacy');
                     push_data_to_gradio_component(advance_arg_input_legacy, component_name, "obj");
@@ -1594,12 +1171,12 @@ async function generate_menu(guiBase64String, btnName){
             ///////////////////////////////////////////////////////////////////////////////////////////
             ////////////////////////////////////    Dropdown   ////////////////////////////////////
             ///////////////////////////////////////////////////////////////////////////////////////////
-            if (gui_args[key].type=='dropdown'){ // PLUGIN_ARG_MENU
+            if (gui_args[key].type == 'dropdown') { // PLUGIN_ARG_MENU
                 const component_name = "plugin_arg_drop_" + dropdown_cnt;
                 push_data_to_gradio_component({
                     visible: true,
                     choices: gui_args[key].options,
-                    label: gui_args[key].title + "(" + gui_args[key].description +  ")",
+                    label: gui_args[key].title + "(" + gui_args[key].description + ")",
                     // label: gui_args[key].title,
                     placeholder: gui_args[key].description,
                     __type__: 'update'
@@ -1614,7 +1191,7 @@ async function generate_menu(guiBase64String, btnName){
     }
 }
 
-async function execute_current_pop_up_plugin(){
+async function execute_current_pop_up_plugin() {
     let guiBase64String = await get_data_from_gradio_component('invisible_current_pop_up_plugin_arg');
     const stringData = atob(guiBase64String);
     let guiJsonData = JSON.parse(stringData);
@@ -1630,8 +1207,8 @@ async function execute_current_pop_up_plugin(){
     let text_cnt = 0;
     for (const key in gui_args) {
         if (gui_args.hasOwnProperty(key)) {
-            if (gui_args[key].type=='string'){ // PLUGIN_ARG_MENU
-                corrisponding_elem_id = "plugin_arg_txt_"+text_cnt
+            if (gui_args[key].type == 'string') { // PLUGIN_ARG_MENU
+                corrisponding_elem_id = "plugin_arg_txt_" + text_cnt
                 gui_args[key].user_confirmed_value = await get_data_from_gradio_component(corrisponding_elem_id);
                 text_cnt += 1;
             }
@@ -1640,8 +1217,8 @@ async function execute_current_pop_up_plugin(){
     let dropdown_cnt = 0;
     for (const key in gui_args) {
         if (gui_args.hasOwnProperty(key)) {
-            if (gui_args[key].type=='dropdown'){ // PLUGIN_ARG_MENU
-                corrisponding_elem_id = "plugin_arg_drop_"+dropdown_cnt
+            if (gui_args[key].type == 'dropdown') { // PLUGIN_ARG_MENU
+                corrisponding_elem_id = "plugin_arg_drop_" + dropdown_cnt
                 gui_args[key].user_confirmed_value = await get_data_from_gradio_component(corrisponding_elem_id);
                 dropdown_cnt += 1;
             }
@@ -1660,29 +1237,29 @@ async function execute_current_pop_up_plugin(){
 
 }
 
-function hide_all_elem(){
-     // PLUGIN_ARG_MENU
-    for (text_cnt = 0; text_cnt < 8; text_cnt++){
+function hide_all_elem() {
+    // PLUGIN_ARG_MENU
+    for (text_cnt = 0; text_cnt < 8; text_cnt++) {
         push_data_to_gradio_component({
             visible: false,
             label: "",
             __type__: 'update'
-        }, "plugin_arg_txt_"+text_cnt, "obj");
-        document.getElementById("plugin_arg_txt_"+text_cnt).parentNode.parentNode.style.display = 'none';
+        }, "plugin_arg_txt_" + text_cnt, "obj");
+        document.getElementById("plugin_arg_txt_" + text_cnt).parentNode.parentNode.style.display = 'none';
     }
-    for (dropdown_cnt = 0; dropdown_cnt < 8; dropdown_cnt++){
+    for (dropdown_cnt = 0; dropdown_cnt < 8; dropdown_cnt++) {
         push_data_to_gradio_component({
             visible: false,
             choices: [],
             label: "",
             __type__: 'update'
-        }, "plugin_arg_drop_"+dropdown_cnt, "obj");
-        document.getElementById("plugin_arg_drop_"+dropdown_cnt).parentNode.style.display = 'none';
+        }, "plugin_arg_drop_" + dropdown_cnt, "obj");
+        document.getElementById("plugin_arg_drop_" + dropdown_cnt).parentNode.style.display = 'none';
     }
 }
 
-function close_current_pop_up_plugin(){
-     // PLUGIN_ARG_MENU
+function close_current_pop_up_plugin() {
+    // PLUGIN_ARG_MENU
     push_data_to_gradio_component({
         visible: false,
         __type__: 'update'
@@ -1690,24 +1267,139 @@ function close_current_pop_up_plugin(){
     hide_all_elem();
 }
 
+
 // 生成高级插件的选择菜单
-advanced_plugin_init_code_lib = {}
-function register_advanced_plugin_init_code(key, code){
-    advanced_plugin_init_code_lib[key] = code;
+plugin_init_info_lib = {}
+function register_plugin_init(key, base64String) {
+    // console.log('x')
+    const stringData = atob(base64String);
+    let guiJsonData = JSON.parse(stringData);
+    if (key in plugin_init_info_lib) {
+    }
+    else {
+        plugin_init_info_lib[key] = {};
+    }
+    plugin_init_info_lib[key].info = guiJsonData.Info;
+    plugin_init_info_lib[key].color = guiJsonData.Color;
+    plugin_init_info_lib[key].elem_id = guiJsonData.ButtonElemId;
+    plugin_init_info_lib[key].label = guiJsonData.Label
+    plugin_init_info_lib[key].enable_advanced_arg = guiJsonData.AdvancedArgs;
+    plugin_init_info_lib[key].arg_reminder = guiJsonData.ArgsReminder;
 }
-function run_advanced_plugin_launch_code(key){
+function register_advanced_plugin_init_code(key, code) {
+    if (key in plugin_init_info_lib) {
+    }
+    else {
+        plugin_init_info_lib[key] = {};
+    }
+    plugin_init_info_lib[key].secondary_menu_code = code;
+}
+function run_advanced_plugin_launch_code(key) {
     // convert js code string to function
-    generate_menu(advanced_plugin_init_code_lib[key], key);
+    generate_menu(plugin_init_info_lib[key].secondary_menu_code, key);
 }
-function on_flex_button_click(key){
-    if (advanced_plugin_init_code_lib.hasOwnProperty(key)){
+function on_flex_button_click(key) {
+    if (plugin_init_info_lib.hasOwnProperty(key) && plugin_init_info_lib[key].hasOwnProperty('secondary_menu_code')) {
         run_advanced_plugin_launch_code(key);
-    }else{
+    } else {
         document.getElementById("old_callback_btn_for_plugin_exe").click();
     }
 }
+async function run_dropdown_shift(dropdown) {
+    let key = dropdown;
+    push_data_to_gradio_component({
+        value: key,
+        variant: plugin_init_info_lib[key].color,
+        info_str: plugin_init_info_lib[key].info,
+        __type__: 'update'
+    }, "elem_switchy_bt", "obj");
+
+    if (plugin_init_info_lib[key].enable_advanced_arg) {
+        push_data_to_gradio_component({
+            visible: true,
+            label: plugin_init_info_lib[key].label,
+            __type__: 'update'
+        }, "advance_arg_input_legacy", "obj");
+    } else {
+        push_data_to_gradio_component({
+            visible: false,
+            label: plugin_init_info_lib[key].label,
+            __type__: 'update'
+        }, "advance_arg_input_legacy", "obj");
+    }
+}
+
+async function duplicate_in_new_window() {
+    // 获取当前页面的URL
+    var url = window.location.href;
+    // 在新标签页中打开这个URL
+    window.open(url, '_blank');
+}
+
+async function run_classic_plugin_via_id(plugin_elem_id) {
+    for (key in plugin_init_info_lib) {
+        if (plugin_init_info_lib[key].elem_id == plugin_elem_id) {
+            // 获取按钮名称
+            let current_btn_name = await get_data_from_gradio_component(plugin_elem_id);
+            // 执行
+            call_plugin_via_name(current_btn_name);
+            return;
+        }
+    }
+    return;
+}
+
+async function call_plugin_via_name(current_btn_name) {
+    gui_args = {}
+    // 关闭菜单 (如果处于开启状态)
+    push_data_to_gradio_component({
+        visible: false,
+        __type__: 'update'
+    }, "plugin_arg_menu", "obj");
+    hide_all_elem();
+    // 为了与旧插件兼容，生成菜单时，自动加载旧高级参数输入区的值
+    let advance_arg_input_legacy = await get_data_from_gradio_component('advance_arg_input_legacy');
+    if (advance_arg_input_legacy.length != 0) {
+        gui_args["advanced_arg"] = {};
+        gui_args["advanced_arg"].user_confirmed_value = advance_arg_input_legacy;
+    }
+    // execute the plugin
+    push_data_to_gradio_component(JSON.stringify(gui_args), "invisible_current_pop_up_plugin_arg_final", "string");
+    push_data_to_gradio_component(current_btn_name, "invisible_callback_btn_for_plugin_exe", "string");
+    document.getElementById("invisible_callback_btn_for_plugin_exe").click();
+}
 
 
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+//  多用途复用提交按钮
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+async function click_real_submit_btn() {
+    document.getElementById("elem_submit").click();
+}
+async function multiplex_function_begin(multiplex_sel) {
+    if (multiplex_sel === "常规对话") {
+        click_real_submit_btn();
+        return;
+    }
+
+    // do not delete `REPLACE_EXTENDED_MULTIPLEX_FUNCTIONS_HERE`! It will be read and replaced by Python code.
+    // REPLACE_EXTENDED_MULTIPLEX_FUNCTIONS_HERE
+}
+async function run_multiplex_shift(multiplex_sel) {
+    let key = multiplex_sel;
+    if (multiplex_sel === "常规对话") {
+        key = "提交";
+    } else {
+        key = "提交 (" + multiplex_sel + ")";
+    }
+    push_data_to_gradio_component({
+        value: key,
+        __type__: 'update'
+    }, "elem_submit_visible", "obj");
+}
 
 
-
+async function persistent_cookie_init(web_cookie_cache, cookie) {
+    return [localStorage.getItem('web_cookie_cache'), cookie];
+}

@@ -1,8 +1,8 @@
 import json
 import time
-import logging
 import traceback
 import requests
+from loguru import logger
 
 # config_private.py放自己的秘密如API和代理网址
 # 读取时首先看是否存在私密的config_private配置文件（不受git管控），如果有，则覆盖原config文件
@@ -44,7 +44,8 @@ def decode_chunk(chunk):
     try:
         chunk = json.loads(chunk[6:])
     except:
-        finish_reason = "JSON_ERROR"
+        respose = ""
+        finish_reason = chunk
     # 错误处理部分
     if "error" in chunk:
         respose = "API_ERROR"
@@ -105,10 +106,7 @@ def generate_message(input, model, key, history, max_output_token, system_prompt
         "stream": True,
         "max_tokens": max_output_token,
     }
-    try:
-        print(f" {model} : {conversation_cnt} : {input[:100]} ..........")
-    except:
-        print("输入中可能存在乱码。")
+
     return headers, playload
 
 
@@ -195,14 +193,17 @@ def get_predict_function(
                 if retry > MAX_RETRY:
                     raise TimeoutError
                 if MAX_RETRY != 0:
-                    print(f"请求超时，正在重试 ({retry}/{MAX_RETRY}) ……")
+                    logger.error(f"请求超时，正在重试 ({retry}/{MAX_RETRY}) ……")
 
         stream_response = response.iter_lines()
         result = ""
+        finish_reason = ""
         while True:
             try:
                 chunk = next(stream_response)
             except StopIteration:
+                if result == "":
+                    raise RuntimeError(f"获得空的回复，可能原因:{finish_reason}")
                 break
             except requests.exceptions.ConnectionError:
                 chunk = next(stream_response)  # 失败了，重试一次？再失败就没办法了。
@@ -215,18 +216,17 @@ def get_predict_function(
             ):
                 chunk = get_full_error(chunk, stream_response)
                 chunk_decoded = chunk.decode()
-                print(chunk_decoded)
+                logger.error(chunk_decoded)
                 raise RuntimeError(
                     f"API异常,请检测终端输出。可能的原因是:{finish_reason}"
                 )
             if chunk:
                 try:
                     if finish_reason == "stop":
-                        logging.info(f"[response] {result}")
+                        if not console_slience:
+                            print(f"[response] {result}")
                         break
                     result += response_text
-                    if not console_slience:
-                        print(response_text, end="")
                     if observe_window is not None:
                         # 观测窗，把已经获取的数据显示出去
                         if len(observe_window) >= 1:
@@ -239,7 +239,7 @@ def get_predict_function(
                     chunk = get_full_error(chunk, stream_response)
                     chunk_decoded = chunk.decode()
                     error_msg = chunk_decoded
-                    print(error_msg)
+                    logger.error(error_msg)
                     raise RuntimeError("Json解析不合常规")
         return result
 
@@ -272,7 +272,7 @@ def get_predict_function(
             inputs, history = handle_core_functionality(
                 additional_fn, inputs, history, chatbot
             )
-        logging.info(f"[raw_input] {inputs}")
+        logger.info(f"[raw_input] {inputs}")
         chatbot.append((inputs, ""))
         yield from update_ui(
             chatbot=chatbot, history=history, msg="等待响应"
@@ -350,6 +350,10 @@ def get_predict_function(
             response_text, finish_reason = decode_chunk(chunk)
             # 返回的数据流第一次为空，继续等待
             if response_text == "" and finish_reason != "False":
+                status_text = f"finish_reason: {finish_reason}"
+                yield from update_ui(
+                    chatbot=chatbot, history=history, msg=status_text
+                )
                 continue
             if chunk:
                 try:
@@ -368,11 +372,11 @@ def get_predict_function(
                             history=history,
                             msg="API异常:" + chunk_decoded,
                         )  # 刷新界面
-                        print(chunk_decoded)
+                        logger.error(chunk_decoded)
                         return
 
                     if finish_reason == "stop":
-                        logging.info(f"[response] {gpt_replying_buffer}")
+                        logger.info(f"[response] {gpt_replying_buffer}")
                         break
                     status_text = f"finish_reason: {finish_reason}"
                     gpt_replying_buffer += response_text
@@ -395,7 +399,7 @@ def get_predict_function(
                     yield from update_ui(
                         chatbot=chatbot, history=history, msg="Json异常" + chunk_decoded
                     )  # 刷新界面
-                    print(chunk_decoded)
+                    logger.error(chunk_decoded)
                     return
 
     return predict_no_ui_long_connection, predict

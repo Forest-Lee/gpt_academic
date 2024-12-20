@@ -77,36 +77,31 @@ def make_history_cache():
     # 定义 后端state（history）、前端（history_cache）、后端setter（history_cache_update）三兄弟
     import gradio as gr
     # 定义history的后端state
-    history = gr.State([])
-    # 定义history的一个孪生的前端存储区（隐藏）
-    history_cache = gr.Textbox(visible=False, elem_id="history_cache")
-    # 定义history_cache->history的更新方法（隐藏）。在触发这个按钮时，会先执行js代码更新history_cache，然后再执行python代码更新history
-    def process_history_cache(history_cache):
-        return json.loads(history_cache)
-    # 另一种更简单的setter方法
-    history_cache_update = gr.Button("", elem_id="elem_update_history", visible=False).click(
-        process_history_cache, inputs=[history_cache], outputs=[history])
-    return history, history_cache, history_cache_update
+    # history = gr.State([])
+    history = gr.Textbox(visible=False, elem_id="history-ng")
+    # # 定义history的一个孪生的前端存储区（隐藏）
+    # history_cache = gr.Textbox(visible=False, elem_id="history_cache")
+    # # 定义history_cache->history的更新方法（隐藏）。在触发这个按钮时，会先执行js代码更新history_cache，然后再执行python代码更新history
+    # def process_history_cache(history_cache):
+    #     return json.loads(history_cache)
+    # # 另一种更简单的setter方法
+    # history_cache_update = gr.Button("", elem_id="elem_update_history", visible=False).click(
+    #     process_history_cache, inputs=[history_cache], outputs=[history])
+    # # save history to history_cache
+    # def process_history_cache(history_cache):
+    #     return json.dumps(history_cache)
+    # # 定义history->history_cache的更新方法（隐藏）
+    # def sync_history_cache(history):
+    #     print("sync_history_cache", history)
+    #     return json.dumps(history)
+    # # history.change(sync_history_cache, inputs=[history], outputs=[history_cache])
+
+    # # history_cache_sync = gr.Button("", elem_id="elem_sync_history", visible=False).click(
+    # #     lambda history: (json.dumps(history)), inputs=[history_cache], outputs=[history])
+    return history, None, None
 
 
 
-# """
-# with gr.Row():
-#     txt = gr.Textbox(show_label=False, placeholder="Input question here.", elem_id='user_input_main').style(container=False)
-#     txtx = gr.Textbox(show_label=False, placeholder="Input question here.", elem_id='user_input_main').style(container=False)
-# with gr.Row():
-#     btn_value = "Test"
-#     elem_id = "TestCase"
-#     variant = "primary"
-#     input_list = [txt, txtx]
-#     output_list = [txt, txtx]
-#     input_name_list = ["txt(input)", "txtx(input)"]
-#     output_name_list = ["txt", "txtx"]
-#     js_callback = """(txt, txtx)=>{console.log(txt); console.log(txtx);}"""
-#     def function(txt, txtx):
-#         return "booo", "goooo"
-#     create_button_with_javascript_callback(btn_value, elem_id, variant, js_callback, input_list, output_list, function, input_name_list, output_name_list)
-# """
 def create_button_with_javascript_callback(btn_value, elem_id, variant, js_callback, input_list, output_list, function, input_name_list, output_name_list):
     import gradio as gr
     middle_ware_component = gr.Textbox(visible=False, elem_id=elem_id+'_buffer')

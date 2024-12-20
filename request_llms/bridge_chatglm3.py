@@ -18,46 +18,38 @@ class GetGLM3Handle(LocalLLMHandle):
 
     def load_model_and_tokenizer(self):
         # 🏃‍♂️🏃‍♂️🏃‍♂️ 子进程执行
-        from transformers import AutoModel, AutoTokenizer
+        from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
         import os, glob
         import os
         import platform
 
-        LOCAL_MODEL_QUANT, device = get_conf("LOCAL_MODEL_QUANT", "LOCAL_MODEL_DEVICE")
-        _model_name_ = "THUDM/chatglm3-6b"
-        # if LOCAL_MODEL_QUANT == "INT4":  # INT4
-        #     _model_name_ = "THUDM/chatglm3-6b-int4"
-        # elif LOCAL_MODEL_QUANT == "INT8":  # INT8
-        #     _model_name_ = "THUDM/chatglm3-6b-int8"
-        # else:
-        #     _model_name_ = "THUDM/chatglm3-6b"  # FP16
+        LOCAL_MODEL_PATH, LOCAL_MODEL_QUANT, device = get_conf("CHATGLM_LOCAL_MODEL_PATH", "LOCAL_MODEL_QUANT", "LOCAL_MODEL_DEVICE")
+        model_path = LOCAL_MODEL_PATH
         with ProxyNetworkActivate("Download_LLM"):
             chatglm_tokenizer = AutoTokenizer.from_pretrained(
-                _model_name_, trust_remote_code=True
+                model_path, trust_remote_code=True
             )
             if device == "cpu":
                 chatglm_model = AutoModel.from_pretrained(
-                    _model_name_,
+                    model_path,
                     trust_remote_code=True,
                     device="cpu",
                 ).float()
             elif LOCAL_MODEL_QUANT == "INT4":  # INT4
                 chatglm_model = AutoModel.from_pretrained(
-                    pretrained_model_name_or_path=_model_name_,
+                    pretrained_model_name_or_path=model_path,
                     trust_remote_code=True,
-                    device="cuda",
-                    load_in_4bit=True,
+                    quantization_config=BitsAndBytesConfig(load_in_4bit=True),
                 )
             elif LOCAL_MODEL_QUANT == "INT8":  # INT8
                 chatglm_model = AutoModel.from_pretrained(
-                    pretrained_model_name_or_path=_model_name_,
+                    pretrained_model_name_or_path=model_path,
                     trust_remote_code=True,
-                    device="cuda",
-                    load_in_8bit=True,
+                    quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 )
             else:
                 chatglm_model = AutoModel.from_pretrained(
-                    pretrained_model_name_or_path=_model_name_,
+                    pretrained_model_name_or_path=model_path,
                     trust_remote_code=True,
                     device="cuda",
                 )

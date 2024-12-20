@@ -1,3 +1,4 @@
+
 import importlib
 import time
 import inspect
@@ -7,9 +8,11 @@ import base64
 import gradio
 import shutil
 import glob
-import logging
+import json
 import uuid
+from loguru import logger
 from functools import wraps
+from textwrap import dedent
 from shared_utils.config_loader import get_conf
 from shared_utils.config_loader import set_conf
 from shared_utils.config_loader import set_multi_conf
@@ -90,24 +93,28 @@ def ArgsGeneralWrapper(f):
     """
     def decorated(request: gradio.Request, cookies:dict, max_length:int, llm_model:str,
                   txt:str, txt2:str, top_p:float, temperature:float, chatbot:list,
-                  history:list, system_prompt:str, plugin_advanced_arg:dict, *args):
+                  json_history:str, system_prompt:str, plugin_advanced_arg:dict, *args):
         txt_passon = txt
+        history = json.loads(json_history) if json_history else []
         if txt == "" and txt2 != "": txt_passon = txt2
         # 引入一个有cookie的chatbot
         if request.username is not None:
             user_name = request.username
         else:
             user_name = default_user_name
+        embed_model = get_conf("EMBEDDING_MODEL")
         cookies.update({
             'top_p': top_p,
             'api_key': cookies['api_key'],
             'llm_model': llm_model,
+            'embed_model': embed_model,
             'temperature': temperature,
             'user_name': user_name,
         })
         llm_kwargs = {
             'api_key': cookies['api_key'],
             'llm_model': llm_model,
+            'embed_model': embed_model,
             'top_p': top_p,
             'max_length': max_length,
             'temperature': temperature,
@@ -143,10 +150,11 @@ def ArgsGeneralWrapper(f):
     return decorated
 
 
-def update_ui(chatbot:ChatBotWithCookies, history, msg="正常", **kwargs):  # 刷新界面
+def update_ui(chatbot:ChatBotWithCookies, history:list, msg:str="正常", **kwargs):  # 刷新界面
     """
     刷新用户界面
     """
+    assert isinstance(history, list), "history必须是一个list"
     assert isinstance(
         chatbot, ChatBotWithCookies
     ), "在传递chatbot的过程中不要将其丢弃。必要时, 可用clear将其清空, 然后用for+append循环重新赋值。"
@@ -170,10 +178,11 @@ def update_ui(chatbot:ChatBotWithCookies, history, msg="正常", **kwargs):  # �
     else:
         chatbot_gr = chatbot
 
-    yield cookies, chatbot_gr, history, msg
+    json_history = json.dumps(history, ensure_ascii=False)
+    yield cookies, chatbot_gr, json_history, msg
 
 
-def update_ui_lastest_msg(lastmsg:str, chatbot:ChatBotWithCookies, history:list, delay=1):  # 刷新界面
+def update_ui_lastest_msg(lastmsg:str, chatbot:ChatBotWithCookies, history:list, delay:float=1, msg:str="正常"):  # 刷新界面
     """
     刷新用户界面
     """
@@ -181,7 +190,7 @@ def update_ui_lastest_msg(lastmsg:str, chatbot:ChatBotWithCookies, history:list,
         chatbot.append(["update_ui_last_msg", lastmsg])
     chatbot[-1] = list(chatbot[-1])
     chatbot[-1][-1] = lastmsg
-    yield from update_ui(chatbot=chatbot, history=history)
+    yield from update_ui(chatbot=chatbot, history=history, msg=msg)
     time.sleep(delay)
 
 
@@ -193,8 +202,19 @@ def trimmed_format_exc():
     replace_path = "."
     return str.replace(current_path, replace_path)
 
+
 def trimmed_format_exc_markdown():
     return '\n\n```\n' + trimmed_format_exc() + '```'
+
+
+class FriendlyException(Exception):
+    def generate_error_html(self):
+        return dedent(f"""
+            <div class="center-div" style="color: crimson;text-align: center;">
+                {"<br>".join(self.args)}
+            </div>
+        """)
+
 
 def CatchException(f):
     """
@@ -206,13 +226,19 @@ def CatchException(f):
                   chatbot_with_cookie:ChatBotWithCookies, history:list, *args, **kwargs):
         try:
             yield from f(main_input, llm_kwargs, plugin_kwargs, chatbot_with_cookie, history, *args, **kwargs)
+        except FriendlyException as e:
+            tb_str = '```\n' + trimmed_format_exc() + '```'
+            if len(chatbot_with_cookie) == 0:
+                chatbot_with_cookie.clear()
+                chatbot_with_cookie.append(["插件调度异常:\n" + tb_str, None])
+            chatbot_with_cookie[-1] = [chatbot_with_cookie[-1][0], e.generate_error_html()]
+            yield from update_ui(chatbot=chatbot_with_cookie, history=history, msg=f'异常')  # 刷新界面
         except Exception as e:
-            from toolbox import get_conf
             tb_str = '```\n' + trimmed_format_exc() + '```'
             if len(chatbot_with_cookie) == 0:
                 chatbot_with_cookie.clear()
                 chatbot_with_cookie.append(["插件调度异常", "异常原因"])
-            chatbot_with_cookie[-1] = (chatbot_with_cookie[-1][0], f"[Local Message] 插件调用出错: \n\n{tb_str} \n")
+            chatbot_with_cookie[-1] = [chatbot_with_cookie[-1][0], f"[Local Message] 插件调用出错: \n\n{tb_str} \n"]
             yield from update_ui(chatbot=chatbot_with_cookie, history=history, msg=f'异常 {e}')  # 刷新界面
 
     return decorated
@@ -548,8 +574,6 @@ def generate_file_link(report_files:List[str]):
     return file_links
 
 
-
-
 def on_report_generated(cookies:dict, files:List[str], chatbot:ChatBotWithCookies):
     if "files_to_promote" in cookies:
         report_files = cookies["files_to_promote"]
@@ -604,9 +628,12 @@ def load_chat_cookies():
                 }
             }
         )
+
+    EMBEDDING_MODEL = get_conf("EMBEDDING_MODEL")
     return {
         "api_key": API_KEY,
         "llm_model": LLM_MODEL,
+        "embed_model": EMBEDDING_MODEL,
         "customize_fn_overwrite": customize_fn_overwrite_,
     }
 
@@ -650,7 +677,7 @@ def run_gradio_in_subpath(demo, auth, port, custom_path):
         if path == "/":
             return True
         if len(path) == 0:
-            print(
+            logger.info(
                 "ilegal custom path: {}\npath must not be empty\ndeploy on root url".format(
                     path
                 )
@@ -658,10 +685,10 @@ def run_gradio_in_subpath(demo, auth, port, custom_path):
             return False
         if path[0] == "/":
             if path[1] != "/":
-                print("deploy on sub-path {}".format(path))
+                logger.info("deploy on sub-path {}".format(path))
                 return True
             return False
-        print(
+        logger.info(
             "ilegal custom path: {}\npath should begin with '/'\ndeploy on root url".format(
                 path
             )
@@ -764,12 +791,12 @@ def zip_folder(source_folder, dest_folder, zip_name):
 
     # Make sure the source folder exists
     if not os.path.exists(source_folder):
-        print(f"{source_folder} does not exist")
+        logger.info(f"{source_folder} does not exist")
         return
 
     # Make sure the destination folder exists
     if not os.path.exists(dest_folder):
-        print(f"{dest_folder} does not exist")
+        logger.info(f"{dest_folder} does not exist")
         return
 
     # Create the name for the zip file
@@ -788,7 +815,7 @@ def zip_folder(source_folder, dest_folder, zip_name):
         os.rename(zip_file, pj(dest_folder, os.path.basename(zip_file)))
         zip_file = pj(dest_folder, os.path.basename(zip_file))
 
-    print(f"Zip file created at {zip_file}")
+    logger.info(f"Zip file created at {zip_file}")
 
 
 def zip_result(folder):
@@ -903,15 +930,18 @@ def get_pictures_list(path):
     return file_manifest
 
 
-def have_any_recent_upload_image_files(chatbot:ChatBotWithCookies):
+def have_any_recent_upload_image_files(chatbot:ChatBotWithCookies, pop:bool=False):
     _5min = 5 * 60
     if chatbot is None:
         return False, None  # chatbot is None
-    most_recent_uploaded = chatbot._cookies.get("most_recent_uploaded", None)
+    if pop:
+        most_recent_uploaded = chatbot._cookies.pop("most_recent_uploaded", None)
+    else:
+        most_recent_uploaded = chatbot._cookies.get("most_recent_uploaded", None)
+    # most_recent_uploaded 是一个放置最新上传图像的路径
     if not most_recent_uploaded:
         return False, None  # most_recent_uploaded is None
     if time.time() - most_recent_uploaded["time"] < _5min:
-        most_recent_uploaded = chatbot._cookies.get("most_recent_uploaded", None)
         path = most_recent_uploaded["path"]
         file_manifest = get_pictures_list(path)
         if len(file_manifest) == 0:
@@ -1007,10 +1037,20 @@ def log_chat(llm_model: str, input_str: str, output_str: str):
     try:
         if output_str and input_str and llm_model:
             uid = str(uuid.uuid4().hex)
-            logging.info(f"[Model({uid})] {llm_model}")
             input_str = input_str.rstrip('\n')
-            logging.info(f"[Query({uid})]\n{input_str}")
             output_str = output_str.rstrip('\n')
-            logging.info(f"[Response({uid})]\n{output_str}\n\n")
+            logger.bind(chat_msg=True).info(dedent(
+            """
+            ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+            [UID]
+            {uid}
+            [Model]
+            {llm_model}
+            [Query]
+            {input_str}
+            [Response]
+            {output_str}
+            ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+            """).format(uid=uid, llm_model=llm_model, input_str=input_str, output_str=output_str))
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())

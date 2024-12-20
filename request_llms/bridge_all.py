@@ -9,6 +9,7 @@
     2. predict_no_ui_long_connection(...)
 """
 import tiktoken, copy, re
+from loguru import logger
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 from toolbox import get_conf, trimmed_format_exc, apply_gpt_academic_string_mask, read_one_api_model_name
@@ -25,6 +26,9 @@ from .bridge_chatglm import predict as chatglm_ui
 from .bridge_chatglm3 import predict_no_ui_long_connection as chatglm3_noui
 from .bridge_chatglm3 import predict as chatglm3_ui
 
+from .bridge_chatglm4 import predict_no_ui_long_connection as chatglm4_noui
+from .bridge_chatglm4 import predict as chatglm4_ui
+
 from .bridge_qianfan import predict_no_ui_long_connection as qianfan_noui
 from .bridge_qianfan import predict as qianfan_ui
 
@@ -33,6 +37,9 @@ from .bridge_google_gemini import predict_no_ui_long_connection  as genai_noui
 
 from .bridge_zhipu import predict_no_ui_long_connection as zhipu_noui
 from .bridge_zhipu import predict as zhipu_ui
+
+from .bridge_taichu import predict_no_ui_long_connection as taichu_noui
+from .bridge_taichu import predict as taichu_ui
 
 from .bridge_cohere import predict as cohere_ui
 from .bridge_cohere import predict_no_ui_long_connection as cohere_noui
@@ -48,9 +55,9 @@ class LazyloadTiktoken(object):
     @staticmethod
     @lru_cache(maxsize=128)
     def get_encoder(model):
-        print('正在加载tokenizer，如果是第一次运行，可能需要一点时间下载参数')
+        logger.info('正在加载tokenizer，如果是第一次运行，可能需要一点时间下载参数')
         tmp = tiktoken.encoding_for_model(model)
-        print('加载tokenizer完毕')
+        logger.info('加载tokenizer完毕')
         return tmp
 
     def encode(self, *args, **kwargs):
@@ -72,6 +79,7 @@ cohere_endpoint = "https://api.cohere.ai/v1/chat"
 ollama_endpoint = "http://localhost:11434/api/chat"
 yimodel_endpoint = "https://api.lingyiwanwu.com/v1/chat/completions"
 deepseekapi_endpoint = "https://api.deepseek.com/v1/chat/completions"
+grok_model_endpoint = "https://api.x.ai/v1/chat/completions"
 
 if not AZURE_ENDPOINT.endswith('/'): AZURE_ENDPOINT += '/'
 azure_endpoint = AZURE_ENDPOINT + f'openai/deployments/{AZURE_ENGINE}/chat/completions?api-version=2023-05-15'
@@ -80,7 +88,7 @@ try:
     API_URL = get_conf("API_URL")
     if API_URL != "https://api.openai.com/v1/chat/completions":
         openai_endpoint = API_URL
-        print("警告！API_URL配置选项将被弃用，请更换为API_URL_REDIRECT配置")
+        logger.warning("警告！API_URL配置选项将被弃用，请更换为API_URL_REDIRECT配置")
 except:
     pass
 # 新版配置
@@ -93,6 +101,7 @@ if cohere_endpoint in API_URL_REDIRECT: cohere_endpoint = API_URL_REDIRECT[coher
 if ollama_endpoint in API_URL_REDIRECT: ollama_endpoint = API_URL_REDIRECT[ollama_endpoint]
 if yimodel_endpoint in API_URL_REDIRECT: yimodel_endpoint = API_URL_REDIRECT[yimodel_endpoint]
 if deepseekapi_endpoint in API_URL_REDIRECT: deepseekapi_endpoint = API_URL_REDIRECT[deepseekapi_endpoint]
+if grok_model_endpoint in API_URL_REDIRECT: grok_model_endpoint = API_URL_REDIRECT[grok_model_endpoint]
 
 # 获取tokenizer
 tokenizer_gpt35 = LazyloadTiktoken("gpt-3.5-turbo")
@@ -112,6 +121,15 @@ model_info = {
         "fn_without_ui": chatgpt_noui,
         "endpoint": openai_endpoint,
         "max_token": 16385,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    },
+
+    "taichu": {
+        "fn_with_ui": taichu_ui,
+        "fn_without_ui": taichu_noui,
+        "endpoint": openai_endpoint,
+        "max_token": 4096,
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
@@ -183,6 +201,27 @@ model_info = {
         "fn_with_ui": chatgpt_ui,
         "fn_without_ui": chatgpt_noui,
         "endpoint": openai_endpoint,
+        "has_multimodal_capacity": True,
+        "max_token": 128000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+    },
+
+    "gpt-4o-mini": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "has_multimodal_capacity": True,
+        "max_token": 128000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+    },
+
+    "chatgpt-4o-latest": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "has_multimodal_capacity": True,
         "max_token": 128000,
         "tokenizer": tokenizer_gpt4,
         "token_cnt": get_token_num_gpt4,
@@ -191,6 +230,7 @@ model_info = {
     "gpt-4o-2024-05-13": {
         "fn_with_ui": chatgpt_ui,
         "fn_without_ui": chatgpt_noui,
+        "has_multimodal_capacity": True,
         "endpoint": openai_endpoint,
         "max_token": 128000,
         "tokenizer": tokenizer_gpt4,
@@ -224,9 +264,54 @@ model_info = {
         "token_cnt": get_token_num_gpt4,
     },
 
+    "o1-preview": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "max_token": 128000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+        "openai_disable_system_prompt": True,
+        "openai_disable_stream": True,
+    },
+
+    "o1-mini": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "max_token": 128000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+        "openai_disable_system_prompt": True,
+        "openai_disable_stream": True,
+    },
+
+    "o1-2024-12-17": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "max_token": 200000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+        "openai_disable_system_prompt": True,
+        "openai_disable_stream": True,
+    },
+
+    "o1": {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "endpoint": openai_endpoint,
+        "max_token": 200000,
+        "tokenizer": tokenizer_gpt4,
+        "token_cnt": get_token_num_gpt4,
+        "openai_disable_system_prompt": True,
+        "openai_disable_stream": True,
+    },
+
     "gpt-4-turbo": {
         "fn_with_ui": chatgpt_ui,
         "fn_without_ui": chatgpt_noui,
+        "has_multimodal_capacity": True,
         "endpoint": openai_endpoint,
         "max_token": 128000,
         "tokenizer": tokenizer_gpt4,
@@ -236,12 +321,12 @@ model_info = {
     "gpt-4-turbo-2024-04-09": {
         "fn_with_ui": chatgpt_ui,
         "fn_without_ui": chatgpt_noui,
+        "has_multimodal_capacity": True,
         "endpoint": openai_endpoint,
         "max_token": 128000,
         "tokenizer": tokenizer_gpt4,
         "token_cnt": get_token_num_gpt4,
     },
-
 
     "gpt-3.5-random": {
         "fn_with_ui": chatgpt_ui,
@@ -338,6 +423,14 @@ model_info = {
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
+    "glm-4-plus":{
+        "fn_with_ui": zhipu_ui,
+        "fn_without_ui": zhipu_noui,
+        "endpoint": None,
+        "max_token": 10124 * 8,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    },
 
     # api_2d (此后不需要在此处添加api2d的接口了，因为下面的代码会自动添加)
     "api2d-gpt-4": {
@@ -349,6 +442,7 @@ model_info = {
         "token_cnt": get_token_num_gpt4,
     },
 
+    # ChatGLM本地模型
     # 将 chatglm 直接对齐到 chatglm2
     "chatglm": {
         "fn_with_ui": chatglm_ui,
@@ -374,6 +468,14 @@ model_info = {
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
+    "chatglm4": {
+        "fn_with_ui": chatglm4_ui,
+        "fn_without_ui": chatglm4_noui,
+        "endpoint": None,
+        "max_token": 8192,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    },
     "qianfan": {
         "fn_with_ui": qianfan_ui,
         "fn_without_ui": qianfan_noui,
@@ -382,19 +484,43 @@ model_info = {
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
+    # Gemini
+    # Note: now gemini-pro is an alias of gemini-1.0-pro.
+    # Warning: gemini-pro-vision has been deprecated.
+    # Support for gemini-pro-vision has been removed.
     "gemini-pro": {
         "fn_with_ui": genai_ui,
         "fn_without_ui": genai_noui,
         "endpoint": gemini_endpoint,
+        "has_multimodal_capacity": False,
         "max_token": 1024 * 32,
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
-    "gemini-pro-vision": {
+    "gemini-1.0-pro": {
         "fn_with_ui": genai_ui,
         "fn_without_ui": genai_noui,
         "endpoint": gemini_endpoint,
+        "has_multimodal_capacity": False,
         "max_token": 1024 * 32,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    },
+    "gemini-1.5-pro": {
+        "fn_with_ui": genai_ui,
+        "fn_without_ui": genai_noui,
+        "endpoint": gemini_endpoint,
+        "has_multimodal_capacity": True,
+        "max_token": 1024 * 204800,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    },
+    "gemini-1.5-flash": {
+        "fn_with_ui": genai_ui,
+        "fn_without_ui": genai_noui,
+        "endpoint": gemini_endpoint,
+        "has_multimodal_capacity": True,
+        "max_token": 1024 * 204800,
         "tokenizer": tokenizer_gpt35,
         "token_cnt": get_token_num_gpt35,
     },
@@ -459,7 +585,7 @@ for model in AVAIL_LLM_MODELS:
 
 # -=-=-=-=-=-=- 以下部分是新加入的模型，可能附带额外依赖 -=-=-=-=-=-=-
 # claude家族
-claude_models = ["claude-instant-1.2","claude-2.0","claude-2.1","claude-3-haiku-20240307","claude-3-sonnet-20240229","claude-3-opus-20240229"]
+claude_models = ["claude-instant-1.2","claude-2.0","claude-2.1","claude-3-haiku-20240307","claude-3-sonnet-20240229","claude-3-opus-20240229","claude-3-5-sonnet-20240620"]
 if any(item in claude_models for item in AVAIL_LLM_MODELS):
     from .bridge_claude import predict_no_ui_long_connection as claude_noui
     from .bridge_claude import predict as claude_ui
@@ -523,6 +649,16 @@ if any(item in claude_models for item in AVAIL_LLM_MODELS):
             "token_cnt": get_token_num_gpt35,
         },
     })
+    model_info.update({
+        "claude-3-5-sonnet-20240620": {
+            "fn_with_ui": claude_ui,
+            "fn_without_ui": claude_noui,
+            "endpoint": claude_endpoint,
+            "max_token": 200000,
+            "tokenizer": tokenizer_gpt35,
+            "token_cnt": get_token_num_gpt35,
+        },
+    })    
 if "jittorllms_rwkv" in AVAIL_LLM_MODELS:
     from .bridge_jittorllms_rwkv import predict_no_ui_long_connection as rwkv_noui
     from .bridge_jittorllms_rwkv import predict as rwkv_ui
@@ -603,7 +739,7 @@ if "newbing" in AVAIL_LLM_MODELS:   # same with newbing-free
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 if "chatglmft" in AVAIL_LLM_MODELS:   # same with newbing-free
     try:
         from .bridge_chatglmft import predict_no_ui_long_connection as chatglmft_noui
@@ -619,7 +755,7 @@ if "chatglmft" in AVAIL_LLM_MODELS:   # same with newbing-free
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 上海AI-LAB书生大模型 -=-=-=-=-=-=-
 if "internlm" in AVAIL_LLM_MODELS:
     try:
@@ -636,7 +772,7 @@ if "internlm" in AVAIL_LLM_MODELS:
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 if "chatglm_onnx" in AVAIL_LLM_MODELS:
     try:
         from .bridge_chatglmonnx import predict_no_ui_long_connection as chatglm_onnx_noui
@@ -652,7 +788,7 @@ if "chatglm_onnx" in AVAIL_LLM_MODELS:
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 通义-本地模型 -=-=-=-=-=-=-
 if "qwen-local" in AVAIL_LLM_MODELS:
     try:
@@ -670,7 +806,7 @@ if "qwen-local" in AVAIL_LLM_MODELS:
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 通义-在线模型 -=-=-=-=-=-=-
 if "qwen-turbo" in AVAIL_LLM_MODELS or "qwen-plus" in AVAIL_LLM_MODELS or "qwen-max" in AVAIL_LLM_MODELS:   # zhipuai
     try:
@@ -706,7 +842,7 @@ if "qwen-turbo" in AVAIL_LLM_MODELS or "qwen-plus" in AVAIL_LLM_MODELS or "qwen-
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 零一万物模型 -=-=-=-=-=-=-
 yi_models = ["yi-34b-chat-0205","yi-34b-chat-200k","yi-large","yi-medium","yi-spark","yi-large-turbo","yi-large-preview"]
 if any(item in yi_models for item in AVAIL_LLM_MODELS):
@@ -786,7 +922,32 @@ if any(item in yi_models for item in AVAIL_LLM_MODELS):
             },
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
+
+
+# -=-=-=-=-=-=- Grok model from x.ai -=-=-=-=-=-=-
+grok_models = ["grok-beta"]
+if any(item in grok_models for item in AVAIL_LLM_MODELS):
+    try:
+        grok_beta_128k_noui, grok_beta_128k_ui = get_predict_function(
+            api_key_conf_name="GROK_API_KEY", max_output_token=8192, disable_proxy=False
+            )
+        
+        model_info.update({
+            "grok-beta": {
+                "fn_with_ui": grok_beta_128k_ui,
+                "fn_without_ui": grok_beta_128k_noui,
+                "can_multi_thread": True,  
+                "endpoint": grok_model_endpoint,
+                "max_token": 128000,
+                "tokenizer": tokenizer_gpt35,
+                "token_cnt": get_token_num_gpt35,
+            },
+            
+        })
+    except:
+        logger.error(trimmed_format_exc())
+
 # -=-=-=-=-=-=- 讯飞星火认知大模型 -=-=-=-=-=-=-
 if "spark" in AVAIL_LLM_MODELS:
     try:
@@ -804,7 +965,7 @@ if "spark" in AVAIL_LLM_MODELS:
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 if "sparkv2" in AVAIL_LLM_MODELS:   # 讯飞星火认知大模型
     try:
         from .bridge_spark import predict_no_ui_long_connection as spark_noui
@@ -821,8 +982,8 @@ if "sparkv2" in AVAIL_LLM_MODELS:   # 讯飞星火认知大模型
             }
         })
     except:
-        print(trimmed_format_exc())
-if "sparkv3" in AVAIL_LLM_MODELS or "sparkv3.5" in AVAIL_LLM_MODELS:   # 讯飞星火认知大模型
+        logger.error(trimmed_format_exc())
+if any(x in AVAIL_LLM_MODELS for x in ("sparkv3", "sparkv3.5", "sparkv4")):   # 讯飞星火认知大模型
     try:
         from .bridge_spark import predict_no_ui_long_connection as spark_noui
         from .bridge_spark import predict as spark_ui
@@ -844,10 +1005,19 @@ if "sparkv3" in AVAIL_LLM_MODELS or "sparkv3.5" in AVAIL_LLM_MODELS:   # 讯飞�
                 "max_token": 4096,
                 "tokenizer": tokenizer_gpt35,
                 "token_cnt": get_token_num_gpt35,
+            },
+            "sparkv4":{
+                "fn_with_ui": spark_ui,
+                "fn_without_ui": spark_noui,
+                "can_multi_thread": True,
+                "endpoint": None,
+                "max_token": 4096,
+                "tokenizer": tokenizer_gpt35,
+                "token_cnt": get_token_num_gpt35,
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 if "llama2" in AVAIL_LLM_MODELS:   # llama2
     try:
         from .bridge_llama2 import predict_no_ui_long_connection as llama2_noui
@@ -863,7 +1033,7 @@ if "llama2" in AVAIL_LLM_MODELS:   # llama2
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 智谱 -=-=-=-=-=-=-
 if "zhipuai" in AVAIL_LLM_MODELS:   # zhipuai 是glm-4的别名，向后兼容配置
     try:
@@ -878,7 +1048,7 @@ if "zhipuai" in AVAIL_LLM_MODELS:   # zhipuai 是glm-4的别名，向后兼容�
             },
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 幻方-深度求索大模型 -=-=-=-=-=-=-
 if "deepseekcoder" in AVAIL_LLM_MODELS:   # deepseekcoder
     try:
@@ -895,7 +1065,7 @@ if "deepseekcoder" in AVAIL_LLM_MODELS:   # deepseekcoder
             }
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- 幻方-深度求索大模型在线API -=-=-=-=-=-=-
 if "deepseek-chat" in AVAIL_LLM_MODELS or "deepseek-coder" in AVAIL_LLM_MODELS:
     try:
@@ -923,7 +1093,7 @@ if "deepseek-chat" in AVAIL_LLM_MODELS or "deepseek-coder" in AVAIL_LLM_MODELS:
             },
         })
     except:
-        print(trimmed_format_exc())
+        logger.error(trimmed_format_exc())
 # -=-=-=-=-=-=- one-api 对齐支持 -=-=-=-=-=-=-
 for model in [m for m in AVAIL_LLM_MODELS if m.startswith("one-api-")]:
     # 为了更灵活地接入one-api多模型管理界面，设计了此接口，例子：AVAIL_LLM_MODELS = ["one-api-mixtral-8x7b(max_token=6666)"]
@@ -932,21 +1102,31 @@ for model in [m for m in AVAIL_LLM_MODELS if m.startswith("one-api-")]:
     #   "mixtral-8x7b"      是模型名（必要）
     #   "(max_token=6666)"  是配置（非必要）
     try:
-        _, max_token_tmp = read_one_api_model_name(model)
+        origin_model_name, max_token_tmp = read_one_api_model_name(model)
+        # 如果是已知模型，则尝试获取其信息
+        original_model_info = model_info.get(origin_model_name.replace("one-api-", "", 1), None)
     except:
-        print(f"one-api模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
+        logger.error(f"one-api模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
         continue
-    model_info.update({
-        model: {
-            "fn_with_ui": chatgpt_ui,
-            "fn_without_ui": chatgpt_noui,
-            "can_multi_thread": True,
-            "endpoint": openai_endpoint,
-            "max_token": max_token_tmp,
-            "tokenizer": tokenizer_gpt35,
-            "token_cnt": get_token_num_gpt35,
-        },
-    })
+    this_model_info = {
+        "fn_with_ui": chatgpt_ui,
+        "fn_without_ui": chatgpt_noui,
+        "can_multi_thread": True,
+        "endpoint": openai_endpoint,
+        "max_token": max_token_tmp,
+        "tokenizer": tokenizer_gpt35,
+        "token_cnt": get_token_num_gpt35,
+    }
+
+    # 同步已知模型的其他信息
+    attribute = "has_multimodal_capacity"
+    if original_model_info is not None and original_model_info.get(attribute, None) is not None: this_model_info.update({attribute: original_model_info.get(attribute, None)})
+    # attribute = "attribute2"
+    # if original_model_info is not None and original_model_info.get(attribute, None) is not None: this_model_info.update({attribute: original_model_info.get(attribute, None)})
+    # attribute = "attribute3"
+    # if original_model_info is not None and original_model_info.get(attribute, None) is not None: this_model_info.update({attribute: original_model_info.get(attribute, None)})
+    model_info.update({model: this_model_info})
+
 # -=-=-=-=-=-=- vllm 对齐支持 -=-=-=-=-=-=-
 for model in [m for m in AVAIL_LLM_MODELS if m.startswith("vllm-")]:
     # 为了更灵活地接入vllm多模型管理界面，设计了此接口，例子：AVAIL_LLM_MODELS = ["vllm-/home/hmp/llm/cache/Qwen1___5-32B-Chat(max_token=6666)"]
@@ -957,7 +1137,7 @@ for model in [m for m in AVAIL_LLM_MODELS if m.startswith("vllm-")]:
     try:
         _, max_token_tmp = read_one_api_model_name(model)
     except:
-        print(f"vllm模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
+        logger.error(f"vllm模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
         continue
     model_info.update({
         model: {
@@ -984,7 +1164,7 @@ for model in [m for m in AVAIL_LLM_MODELS if m.startswith("ollama-")]:
     try:
         _, max_token_tmp = read_one_api_model_name(model)
     except:
-        print(f"ollama模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
+        logger.error(f"ollama模型 {model} 的 max_token 配置不是整数，请检查配置文件。")
         continue
     model_info.update({
         model: {
@@ -1019,6 +1199,24 @@ if len(AZURE_CFG_ARRAY) > 0:
         })
         if azure_model_name not in AVAIL_LLM_MODELS:
             AVAIL_LLM_MODELS += [azure_model_name]
+
+# -=-=-=-=-=-=- Openrouter模型对齐支持 -=-=-=-=-=-=-
+# 为了更灵活地接入Openrouter路由，设计了此接口
+for model in [m for m in AVAIL_LLM_MODELS if m.startswith("openrouter-")]:
+    from request_llms.bridge_openrouter import predict_no_ui_long_connection as openrouter_noui
+    from request_llms.bridge_openrouter import predict as openrouter_ui
+    model_info.update({
+        model: {
+            "fn_with_ui": openrouter_ui,
+            "fn_without_ui": openrouter_noui,
+            # 以下参数参考gpt-4o-mini的配置, 请根据实际情况修改
+            "endpoint": openai_endpoint,
+            "has_multimodal_capacity": True,
+            "max_token": 128000,
+            "tokenizer": tokenizer_gpt4,
+            "token_cnt": get_token_num_gpt4,
+        },
+    })
 
 
 # -=-=-=-=-=-=--=-=-=-=-=-=--=-=-=-=-=-=--=-=-=-=-=-=-=-=
@@ -1165,5 +1363,5 @@ def predict(inputs:str, llm_kwargs:dict, plugin_kwargs:dict, chatbot,
     if additional_fn: # 根据基础功能区 ModelOverride 参数调整模型类型
         llm_kwargs, additional_fn, method = execute_model_override(llm_kwargs, additional_fn, method)
 
+    # 更新一下llm_kwargs的参数，否则会出现参数不匹配的问题
     yield from method(inputs, llm_kwargs, plugin_kwargs, chatbot, history, system_prompt, stream, additional_fn)
-
